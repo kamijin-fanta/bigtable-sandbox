@@ -1,0 +1,6 @@
+[submodule "proto/googleapis"]
+	path = proto/googleapis
+	url = https://github.com/googleapis/googleapis.git
+[submodule "proto/go-genproto"]
+	path = proto/go-genproto
+	url = https://github.com/google/go-genproto.git
