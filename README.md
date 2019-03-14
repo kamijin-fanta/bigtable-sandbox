@@ -11,16 +11,16 @@
   - [x] ReadRows(range support)
 - level 2
   - [x] Column Family
-  - [] ReadRows(filtered request support)
-  - [] MutateRows
-  - [] SampleRowKeys
-  - [] CheckAndMutateRow
-  - [] ReadModifyWriteRow
+  - [ ] ReadRows(filtered request support)
+  - [ ] MutateRows
+  - [ ] CheckAndMutateRow
+  - [ ] ReadModifyWriteRow
 - level 3
-  - [] ReadRows(advanced filter support)
-  - [] Timestamp
+  - [ ] ReadRows(advanced filter support)
+  - [ ] Timestamp
 - level 4
-  - [] Version, GC
-  - [] Statistics
-  - [] Distribute
-  - [] BigCell(ValueSize)
+  - [ ] Version, GC
+  - [ ] Statistics
+  - [ ] Distribute
+  - [ ] BigCell(ValueSize)
+  - [ ] SampleRowKeys
