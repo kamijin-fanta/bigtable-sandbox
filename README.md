@@ -6,19 +6,21 @@
 ### milestone
 
 - level 1
-  - MutateRow
-  - ReadRows(basic support)
+  - [x] MutateRow
+  - [x] ReadRows(basic support)
+  - [x] ReadRows(range support)
 - level 2
-  - ReadRows(filtered request support)
-  - MutateRows
-  - SampleRowKeys
-  - CheckAndMutateRow
-  - ReadModifyWriteRow
+  - [x] Column Family
+  - [] ReadRows(filtered request support)
+  - [] MutateRows
+  - [] SampleRowKeys
+  - [] CheckAndMutateRow
+  - [] ReadModifyWriteRow
 - level 3
-  - ReadRows(advanced filter support)
-  - Timestamp
-  - Column Family
+  - [] ReadRows(advanced filter support)
+  - [] Timestamp
 - level 4
-  - Version, GC
-  - Statistics
-  - Distribute
+  - [] Version, GC
+  - [] Statistics
+  - [] Distribute
+  - [] BigCell(ValueSize)
