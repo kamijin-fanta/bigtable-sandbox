@@ -58,27 +58,27 @@ func newClient() (conn *grpc.ClientConn, client bigtable.BigtableClient, ctx con
 }
 
 func ExampleEncoder() {
-	key := KeyEncoder([]byte("ROW_KEY"), "FAMILY", []byte("COLUMN"))
+	key := KeyEncoder("TABLE", []byte("ROW_KEY"), "FAMILY", []byte("COLUMN"))
 	fmt.Printf("ASCII: %s / HEX: %x\n", key, key)
 
-	key = KeyEncoder([]byte("ROW_KEY"), "FAMILY", []byte(""))
+	key = KeyEncoder("TABLE", []byte("ROW_KEY"), "FAMILY", []byte(""))
 	fmt.Printf("ASCII: %s / HEX: %x\n", key, key)
 
-	key = KeyEncoder([]byte("ROW_KEY"), "", []byte(""))
+	key = KeyEncoder("TABLE", []byte("ROW_KEY"), "", []byte(""))
 	fmt.Printf("ASCII: %s / HEX: %x\n", key, key)
 
 	// Output:
-	// ASCII: z:ROW_KEY:FAMILY:COLUMN / HEX: 7a3a524f575f4b45593a46414d494c593a434f4c554d4e
-	// ASCII: z:ROW_KEY:FAMILY / HEX: 7a3a524f575f4b45593a46414d494c59
-	// ASCII: z:ROW_KEY / HEX: 7a3a524f575f4b4559
+	// ASCII: z:TABLE:ROW_KEY:FAMILY:COLUMN / HEX: 7a3a5441424c453a524f575f4b45593a46414d494c593a434f4c554d4e
+	// ASCII: z:TABLE:ROW_KEY:FAMILY / HEX: 7a3a5441424c453a524f575f4b45593a46414d494c59
+	// ASCII: z:TABLE:ROW_KEY / HEX: 7a3a5441424c453a524f575f4b4559
 }
 
 func ExampleDecoder() {
-	dst, _ := hex.DecodeString("7a3a524f575f4b45593a46414d494c593a434f4c554d4e")
-	rowKey, family, colmn := KeyDecoder(dst)
-	fmt.Printf("RowKey: %s / Family: %s / Column: %s", rowKey, family, colmn)
+	dst, _ := hex.DecodeString("7a3a5441424c453a524f575f4b45593a46414d494c593a434f4c554d4e")
+	table, rowKey, family, colmn := KeyDecoder(dst)
+	fmt.Printf("Table: %s / RowKey: %s / Family: %s / Column: %s", table, rowKey, family, colmn)
 	// Output:
-	// RowKey: ROW_KEY / Family: FAMILY / Column: COLUMN
+	// Table: TABLE / RowKey: ROW_KEY / Family: FAMILY / Column: COLUMN
 }
 
 func TestService(t *testing.T) {
@@ -172,5 +172,81 @@ func TestService(t *testing.T) {
 		row, err = table.ReadRow(ctx, rowKey)
 		ass.Nil(err)
 		ass.Equal(0, len(row["default"]))
+	})
+
+	t.Run("google cli / read filters", func(t *testing.T) {
+		ass := assert.New(t)
+		table := btClient.Open("default2")
+
+		rowKeyPrefix := "filters_k"
+
+		writeMut := bigtableCli.NewMutation()
+		writeMut.Set("cfA", "cA1", bigtableCli.Now(), []byte("vA1"))
+		writeMut.Set("cfA", "cA2", bigtableCli.Now(), []byte("vA2"))
+		writeMut.Set("cfA", "cA3", bigtableCli.Now(), []byte("vA3"))
+		writeMut.Set("cfA", "cA4", bigtableCli.Now(), []byte("vA4"))
+		writeMut.Set("cfB", "cB1", bigtableCli.Now(), []byte("vB1"))
+		writeMut.Set("cfB", "cB2", bigtableCli.Now(), []byte("vB2"))
+		writeMut.Set("cfC", "cC1", bigtableCli.Now(), []byte("vC1"))
+		err = table.Apply(ctx, rowKeyPrefix+"1", writeMut)
+		ass.Nil(err)
+
+		filter := bigtableCli.RowFilter(
+			bigtableCli.InterleaveFilters(
+				bigtableCli.ChainFilters(
+					bigtableCli.FamilyFilter("cfA"),
+					bigtableCli.ValueRangeFilter([]byte("vA1"), []byte("vA3")),
+				),
+				bigtableCli.ColumnFilter("cB."),
+			),
+		)
+
+		row, err := table.ReadRow(ctx, rowKeyPrefix+"1", filter)
+		ass.Nil(err)
+		//for cf := range row {
+		//	for i, cell := range row[cf] {
+		//		t.Logf("=>>> %s %d %+v %s\n", cf, i, cell, cell.Value)
+		//	}
+		//}
+
+		ass.Len(row["cfA"], 2)
+		ass.Equal("vA2", string(row["cfA"][0].Value))
+		ass.Equal("vA3", string(row["cfA"][1].Value))
+		ass.Len(row["cfB"], 2)
+		ass.Equal("vB1", string(row["cfB"][0].Value))
+		ass.Equal("vB2", string(row["cfB"][1].Value))
+		ass.Len(row["cfC"], 0)
+	})
+
+	t.Run("google cli / range read", func(t *testing.T) {
+		ass := assert.New(t)
+		table := btClient.Open("default3")
+
+		rowKeyPrefix := "range_k"
+
+		writeMut := bigtableCli.NewMutation()
+		writeMut.Set("cf", "c1", bigtableCli.Now(), []byte("v1"))
+		err = table.Apply(ctx, rowKeyPrefix+"1", writeMut)
+		err = table.Apply(ctx, rowKeyPrefix+"2", writeMut)
+		err = table.Apply(ctx, rowKeyPrefix+"3", writeMut)
+		err = table.Apply(ctx, rowKeyPrefix+"4", writeMut)
+		ass.Nil(err)
+
+		r := bigtableCli.NewRange(rowKeyPrefix+"1", rowKeyPrefix+"4")
+		all := make(bigtableCli.Row)
+		err := table.ReadRows(ctx, r, func(row bigtableCli.Row) bool {
+			for k, v := range row {
+				if all[k] == nil {
+					all[k] = []bigtableCli.ReadItem{}
+				}
+				all[k] = append(all[k], v...)
+			}
+			return true
+		})
+		ass.Nil(err)
+		ass.Len(all["cf"], 3)
+		ass.Equal(rowKeyPrefix+"2", all["cf"][0].Row)
+		ass.Equal(rowKeyPrefix+"3", all["cf"][1].Row)
+		ass.Equal(rowKeyPrefix+"4", all["cf"][2].Row)
 	})
 }
