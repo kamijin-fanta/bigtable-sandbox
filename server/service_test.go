@@ -8,6 +8,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/syndtr/goleveldb/leveldb"
 	bigtableOption "google.golang.org/api/option"
+	"google.golang.org/genproto/googleapis/bigtable/admin/v2"
 	"google.golang.org/genproto/googleapis/bigtable/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
@@ -27,6 +28,7 @@ func newClient() (conn *grpc.ClientConn, client bigtable.BigtableClient, ctx con
 	grpcServer := grpc.NewServer()
 	service := MockBigtableService{db}
 	bigtable.RegisterBigtableServer(grpcServer, &service)
+	admin.RegisterBigtableTableAdminServer(grpcServer, &service)
 
 	go func() {
 		if err := grpcServer.Serve(listener); err != nil {
@@ -85,7 +87,7 @@ func TestService(t *testing.T) {
 	conn, client, ctx, closer := newClient()
 	defer closer()
 
-	t.Run("Mutate Set Value", func(t *testing.T) {
+	t.Run("Mutate_SetValue", func(t *testing.T) {
 		mut := &bigtable.Mutation{
 			Mutation: &bigtable.Mutation_SetCell_{
 				SetCell: &bigtable.Mutation_SetCell{
@@ -131,14 +133,50 @@ func TestService(t *testing.T) {
 
 	btClient, err := bigtableCli.NewClient(
 		ctx,
-		"",
-		"",
+		"example-project",
+		"example-instance",
 		bigtableOption.WithGRPCConn(conn),
 	)
+	assert.Nil(t, err, "user client connection error")
 	if err != nil {
-		t.Errorf("bigtable client connection error %v", err)
+		panic(err)
 	}
-	t.Run("google cli / ReadRows", func(t *testing.T) {
+
+	btAdmClient, err := bigtableCli.NewAdminClient(
+		ctx,
+		"example-project",
+		"example-instance",
+		bigtableOption.WithGRPCConn(conn),
+	)
+	assert.Nil(t, err, "admin client connection error")
+	if err != nil {
+		panic(err)
+	}
+
+	t.Run("adminCli__create_table", func(t *testing.T) {
+		ass := assert.New(t)
+		err := btAdmClient.CreateTable(ctx, "default")
+		ass.Nil(err)
+
+		err = btAdmClient.CreateColumnFamily(ctx, "default", "cf1")
+		ass.Nil(err)
+		err = btAdmClient.CreateColumnFamily(ctx, "default", "cf2")
+		ass.Nil(err)
+
+		tableInfo, err := btAdmClient.TableInfo(ctx, "default")
+		ass.Nil(err)
+		ass.NotNil(tableInfo)
+		ass.Equal([]string{"cf1", "cf2"}, tableInfo.Families)
+
+		err = btAdmClient.DeleteColumnFamily(ctx, "default", "cf2")
+		ass.Nil(err)
+
+		tableInfo, err = btAdmClient.TableInfo(ctx, "default")
+		ass.Nil(err)
+		ass.NotNil(tableInfo)
+		ass.EqualValues([]string{"cf1"}, tableInfo.Families)
+	})
+	t.Run("cli__ReadRows", func(t *testing.T) {
 		table := btClient.Open("default")
 		row, err := table.ReadRow(ctx, "example_key")
 		mut := bigtableCli.NewMutation()
@@ -146,7 +184,8 @@ func TestService(t *testing.T) {
 		t.Logf("google read rows, %v %v", row, err)
 	})
 
-	t.Run("google cli / Write -> Read -> Delete -> Read", func(t *testing.T) {
+	t.Run("cli__e2e_1st", func(t *testing.T) {
+		// Write -> Read -> Delete -> Read
 		ass := assert.New(t)
 		table := btClient.Open("default")
 
@@ -174,7 +213,7 @@ func TestService(t *testing.T) {
 		ass.Equal(0, len(row["default"]))
 	})
 
-	t.Run("google cli / read filters", func(t *testing.T) {
+	t.Run("cli__read_filters", func(t *testing.T) {
 		ass := assert.New(t)
 		table := btClient.Open("default2")
 
@@ -218,7 +257,7 @@ func TestService(t *testing.T) {
 		ass.Len(row["cfC"], 0)
 	})
 
-	t.Run("google cli / range read", func(t *testing.T) {
+	t.Run("cli__range_read", func(t *testing.T) {
 		ass := assert.New(t)
 		table := btClient.Open("default3")
 

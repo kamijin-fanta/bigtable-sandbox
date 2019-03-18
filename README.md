@@ -35,3 +35,10 @@
     - HardLimit
       - Cell size: 100MB
       - Row: 256MB 
+  - [ ] Admin
+    - Get/reate/Delete Table
+    - Drop row range
+    - Snapshot
+    - ModifyColumnFamilies
+    - 
+    - 

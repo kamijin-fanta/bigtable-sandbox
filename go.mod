@@ -2,6 +2,7 @@ module bigtable-sandbox
 
 require (
 	cloud.google.com/go v0.37.0
+	github.com/gogo/protobuf v1.1.1
 	github.com/golang/protobuf v1.2.0
 	github.com/stretchr/testify v1.3.0
 	github.com/syndtr/goleveldb v1.0.0
