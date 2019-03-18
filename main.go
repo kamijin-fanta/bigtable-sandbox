@@ -1,7 +1,9 @@
 package main
 
 import (
+	"flag"
 	"fmt"
+	"github.com/syndtr/goleveldb/leveldb"
 	bigtableAdmin "google.golang.org/genproto/googleapis/bigtable/admin/v2"
 	"google.golang.org/genproto/googleapis/bigtable/v2"
 	"google.golang.org/grpc"
@@ -13,7 +15,13 @@ func main() {
 	if err != nil {
 		panic("failed to listen")
 	}
-	service := MockBigtableService{}
+
+	dbPath := flag.String("db", "./data.db", "db path")
+	db, err := leveldb.OpenFile(*dbPath, nil)
+	if err != nil {
+		panic(db)
+	}
+	service := MockBigtableService{db}
 	grpcServer := grpc.NewServer()
 	bigtable.RegisterBigtableServer(grpcServer, &service)
 	bigtableAdmin.RegisterBigtableTableAdminServer(grpcServer, &service)
