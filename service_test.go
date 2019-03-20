@@ -16,7 +16,6 @@ import (
 	"net"
 	"os"
 	"testing"
-	"time"
 )
 
 func newClient() (conn *grpc.ClientConn, client bigtable.BigtableClient, ctx context.Context, closer func(), err error) {
@@ -46,7 +45,7 @@ func newClient() (conn *grpc.ClientConn, client bigtable.BigtableClient, ctx con
 	conn, err = grpc.DialContext(
 		ctx,
 		"bufnet",
-		grpc.WithDialer(func(string, time.Duration) (net.Conn, error) {
+		grpc.WithContextDialer(func(ctx context.Context, addr string) (conn net.Conn, e error) {
 			return listener.Dial()
 		}),
 		grpc.WithInsecure(),

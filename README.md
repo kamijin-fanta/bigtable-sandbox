@@ -12,17 +12,17 @@
 - level 2
   - [x] Column Family
   - [x] ReadRows(filtered request support)
-  - [ ] MutateRows
+  - [x] MutateRows
   - [ ] CheckAndMutateRow
   - [ ] ReadModifyWriteRow
 - level 3
   - [ ] ReadRows(advanced filter support)
   - [ ] Timestamp
-  - [ ] Family
+  - [x] Family
 - level 4
   - [ ] Version, GC
   - [ ] Statistics
-  - [ ] Distribute
+  - [x] Distribute
   - [ ] BigCell(ValueSize)
   - [ ] SampleRowKeys
   - [ ] Limitation/Validation

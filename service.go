@@ -145,7 +145,7 @@ func (service *MockBigtableService) ReadRows(req *bigtable.ReadRowsRequest, serv
 		switch k := reqRange.EndKey.(type) {
 		case *bigtable.RowRange_EndKeyOpen:
 			endKey = KeyEncoder(tableName, k.EndKeyOpen, "", []byte{})
-			endKey = append(endKey, 0)
+			endKey = append(endKey)
 		case *bigtable.RowRange_EndKeyClosed:
 			endKey = KeyEncoder(tableName, k.EndKeyClosed, "", []byte{})
 			endKey = append(endKey, 255)
@@ -163,7 +163,7 @@ func (service *MockBigtableService) ReadRows(req *bigtable.ReadRowsRequest, serv
 			copy(value, iter.Value())
 			_, rowKey, family, column := KeyDecoder(key)
 
-			if lastKey != nil && !bytes.Equal(lastKey, key) {
+			if lastKey != nil && !bytes.Equal(lastKey, rowKey) {
 				filtered, err := makeChunk(req.Filter, rowStat)
 				if err != nil {
 					return err
@@ -179,7 +179,7 @@ func (service *MockBigtableService) ReadRows(req *bigtable.ReadRowsRequest, serv
 				Column:     column,
 				Value:      value,
 			})
-			lastKey = key
+			lastKey = rowKey
 		}
 		// todo req.RowsLimit
 		filtered, err := makeChunk(req.Filter, rowStat)
