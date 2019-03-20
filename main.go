@@ -11,7 +11,7 @@ import (
 )
 
 func main() {
-	lis, err := net.Listen("tcp", "127.0.0.1:8111")
+	lis, err := net.Listen("tcp", ":8111")
 	if err != nil {
 		panic("failed to listen")
 	}
@@ -21,7 +21,10 @@ func main() {
 	if err != nil {
 		panic(db)
 	}
-	service := MockBigtableService{db}
+
+	var store Store = &LeveldbStore{db: db}
+	service := MockBigtableService{db: store}
+
 	grpcServer := grpc.NewServer()
 	bigtable.RegisterBigtableServer(grpcServer, &service)
 	bigtableAdmin.RegisterBigtableTableAdminServer(grpcServer, &service)
