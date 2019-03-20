@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/golang/protobuf/ptypes/wrappers"
@@ -60,9 +61,11 @@ func KeyDecoder(encodedKey []byte) (table string, rowKey []byte, family string, 
 				familyPos := bytes.LastIndexByte(encodedKey[:columnPos], delimiter)
 				if familyPos != -1 && familyPos != rowKeyPos {
 					table = string(encodedKey[tablePos+1 : rowKeyPos])
-					rowKey = encodedKey[rowKeyPos+1 : familyPos]
+					rowKey = make([]byte, familyPos-rowKeyPos-1)
+					copy(rowKey, encodedKey[rowKeyPos+1:familyPos])
 					family = string(encodedKey[familyPos+1 : columnPos])
-					column = encodedKey[columnPos+1:]
+					column = make([]byte, len(encodedKey)-columnPos-1)
+					copy(column, encodedKey[columnPos+1:])
 				}
 			}
 		}
@@ -161,7 +164,8 @@ func (service *MockBigtableService) ReadRows(req *bigtable.ReadRowsRequest, serv
 			copy(key, iter.Key())
 			value := make([]byte, len(iter.Value()))
 			copy(value, iter.Value())
-			_, rowKey, family, column := KeyDecoder(key)
+			table, rowKey, family, column := KeyDecoder(key)
+			fmt.Printf("Range KeyDecoder: input:%q table: %s key:%q family:%s col: %s\n", key, table, rowKey, family, column)
 
 			if lastKey != nil && !bytes.Equal(lastKey, rowKey) {
 				filtered, err := makeChunk(req.Filter, rowStat)
@@ -189,6 +193,7 @@ func (service *MockBigtableService) ReadRows(req *bigtable.ReadRowsRequest, serv
 		chunks = append(chunks, filtered...)
 	}
 
+	fmt.Printf("Chunk %+v\n", chunks)
 	res := bigtable.ReadRowsResponse{
 		LastScannedRowKey: []byte{},
 		Chunks:            chunks,

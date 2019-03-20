@@ -81,7 +81,7 @@ func FilterRow(filter *bigtable.RowFilter, row []*CellStatus) ([]*CellStatus, er
 		}
 		return output, nil
 	case *bigtable.RowFilter_Condition_:
-		result, err := FilterRow(filter, row)
+		result, err := FilterRow(f.Condition.PredicateFilter, row)
 		if err != nil {
 			return nil, err
 		}

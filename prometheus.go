@@ -9,7 +9,9 @@ import (
 	"github.com/golang/snappy"
 	"github.com/prometheus/prometheus/prompb"
 	bigtableOption "google.golang.org/api/option"
+	"google.golang.org/genproto/googleapis/bigtable/v2"
 	"google.golang.org/grpc"
+	"io"
 	"io/ioutil"
 	"net/http"
 	"strconv"
@@ -27,19 +29,22 @@ func NewPrometheusRemote(conn *grpc.ClientConn, ctx context.Context, project, in
 	if err != nil {
 		return nil, err
 	}
+	grpcClient := bigtable.NewBigtableClient(conn)
 	return &PrometheusRemote{
-		ctx:    ctx,
-		conn:   conn,
-		client: client,
-		table:  table,
+		ctx:        ctx,
+		conn:       conn,
+		client:     client,
+		table:      table,
+		grpcClient: grpcClient,
 	}, nil
 }
 
 type PrometheusRemote struct {
-	ctx    context.Context
-	conn   *grpc.ClientConn
-	client *bigtableCli.Client
-	table  *bigtableCli.Table
+	ctx        context.Context
+	conn       *grpc.ClientConn
+	client     *bigtableCli.Client
+	table      *bigtableCli.Table
+	grpcClient bigtable.BigtableClient
 }
 
 func (p *PrometheusRemote) Register() {
@@ -176,35 +181,96 @@ func (p *PrometheusRemote) RemoteRead(w http.ResponseWriter, r *http.Request) {
 
 func (p *PrometheusRemote) RemoteReader(request prompb.ReadRequest) *prompb.ReadResponse {
 	for _, query := range request.Queries {
-		CollectTargets(p.ctx, p.table, query.Matchers)
+		//targets, _ := CollectTargets(p.ctx, p.grpcClient, query.Matchers)
 		fmt.Println(query)
 	}
 	return nil
 }
-func CollectTargets(ctx context.Context, table *bigtableCli.Table, matchers []*prompb.LabelMatcher) ([]string, error) {
-	var filters []bigtableCli.Filter
+func CollectTargets(ctx context.Context, client bigtable.BigtableClient, matchers []*prompb.LabelMatcher) ([]string, error) {
+	var subFilters []*bigtable.RowFilter
 	// todo support to NotEqual, RegexEqual, NotRegexEqual
 	for _, matcher := range matchers {
-		nameFilter := bigtableCli.ColumnFilter(matcher.Name)
-		valueFilter := bigtableCli.ValueFilter(matcher.Value)
-		filters = append(filters, bigtableCli.ChainFilters(nameFilter, valueFilter))
+		f := &bigtable.RowFilter{
+			Filter: &bigtable.RowFilter_Chain_{
+				Chain: &bigtable.RowFilter_Chain{
+					Filters: []*bigtable.RowFilter{
+						{
+							Filter: &bigtable.RowFilter_ColumnQualifierRegexFilter{
+								ColumnQualifierRegexFilter: []byte(matcher.Name),
+							},
+						},
+						{
+							Filter: &bigtable.RowFilter_ValueRegexFilter{
+								ValueRegexFilter: []byte(matcher.Value),
+							},
+						},
+					},
+				},
+			},
+		}
+		subFilters = append(subFilters, f)
 	}
-	filter := bigtableCli.RowFilter(bigtableCli.ChainFilters(filters...))
-	readRange := bigtableCli.NewRange("index:", "index:"+string(255))
-
 	var targets []string
 
-	err := table.ReadRows(ctx, readRange, func(rows bigtableCli.Row) bool {
-		ind := rows["index"]
-		if ind != nil {
-			for _, item := range ind {
-				keySplit := strings.Split(item.Row, ":")
-				target := keySplit[len(keySplit)-1]
-				targets = append(targets, target)
-			}
+	fetchOffset := 0
+	if len(subFilters) > 0 {
+		fetchOffset = len(subFilters) - 1
+	}
+
+	req := &bigtable.ReadRowsRequest{
+		TableName: "prometheus",
+		Rows: &bigtable.RowSet{
+			RowRanges: []*bigtable.RowRange{
+				{
+					StartKey: &bigtable.RowRange_StartKeyClosed{[]byte("index:")},
+					EndKey:   &bigtable.RowRange_EndKeyOpen{append([]byte("index:"), 255)},
+				},
+			},
+		},
+		Filter: &bigtable.RowFilter{
+			Filter: &bigtable.RowFilter_Condition_{ // セルが含まれる場合は、PassAllしたい
+				Condition: &bigtable.RowFilter_Condition{
+					PredicateFilter: &bigtable.RowFilter{
+						Filter: &bigtable.RowFilter_Chain_{ // セルの条件がOKなら、OffsetPerRowを行う
+							Chain: &bigtable.RowFilter_Chain{
+								Filters: []*bigtable.RowFilter{
+									{
+										Filter: &bigtable.RowFilter_Interleave_{ // ヒットするセルの数を数える
+											Interleave: &bigtable.RowFilter_Interleave{
+												Filters: subFilters,
+											},
+										},
+									},
+									{
+										// 全てのSubFiltersにマッチした場合のみ、1セルだけ出力する
+										Filter: &bigtable.RowFilter_CellsPerRowOffsetFilter{int32(fetchOffset)},
+									},
+								},
+							},
+						},
+					},
+					TrueFilter: &bigtable.RowFilter{ // マッチするセルを、行につき1つだけ出力する
+						Filter: &bigtable.RowFilter_CellsPerRowLimitFilter{1},
+					},
+				},
+			},
+		},
+	}
+
+	res, err := client.ReadRows(ctx, req)
+	for {
+		msg, err := res.Recv()
+		if err == io.EOF {
+			break
+		} else if err != nil {
+			return nil, err
 		}
-		return true
-	}, filter)
+		for _, chunk := range msg.Chunks {
+			keyArr := strings.Split(string(chunk.RowKey), ":")
+			targets = append(targets, keyArr[len(keyArr)-1])
+			//fmt.Printf("TARGETSSSSSSSSSSS: %s / %s / %q\n", chunk.RowKey, chunk.FamilyName.Value, chunk.Value)
+		}
+	}
 
 	if err != nil {
 		return nil, err
