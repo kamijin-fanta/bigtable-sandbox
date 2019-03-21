@@ -81,7 +81,7 @@ func TestPrometheus(t *testing.T) {
 						},
 						{
 							Name:  "job",
-							Value: "node_exporter",
+							Value: "node_exporter:9100",
 						},
 					},
 					Samples: []prompb.Sample{
@@ -164,7 +164,7 @@ func TestPrometheus(t *testing.T) {
 			ass.Nil(err)
 			ass.EqualValues(
 				[]string{
-					"__name__=cpu_usage&instance=172.24.1.1&job=node_exporter",
+					"__name__=cpu_usage&instance=172.24.1.1&job=node_exporter:9100",
 					"__name__=cpu_usage&instance=192.168.11.1&job=node_exporter",
 				},
 				targets,
@@ -225,7 +225,7 @@ func TestPrometheus(t *testing.T) {
 			},
 			{
 				Name:  "job",
-				Value: "node_exporter",
+				Value: "node_exporter:9100",
 			},
 		}, res.Results[0].Timeseries[0].Labels)
 

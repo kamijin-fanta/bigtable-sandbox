@@ -325,8 +325,11 @@ func CollectTargets(ctx context.Context, client bigtable.BigtableClient, matcher
 			return nil, err
 		}
 		for _, chunk := range msg.Chunks {
-			keyArr := strings.Split(string(chunk.RowKey), ":")
-			targets = append(targets, keyArr[len(keyArr)-1])
+			pos := strings.Index(string(chunk.RowKey), ":")
+			if pos == -1 {
+				pos = 0
+			}
+			targets = append(targets, string(chunk.RowKey[pos+1:]))
 			//fmt.Printf("TARGETSSSSSSSSSSS: %s / %s / %q\n", chunk.RowKey, chunk.FamilyName.Value, chunk.Value)
 		}
 	}

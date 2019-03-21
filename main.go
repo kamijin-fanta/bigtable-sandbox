@@ -43,9 +43,9 @@ func main() {
 		stop <- true
 	}()
 
-	listener := bufconn.Listen(1024 * 1024)
+	listener := bufconn.Listen(5 * 1024 * 1024)
 	go func() {
-		err = grpcServer.Serve(lis)
+		err = grpcServer.Serve(listener)
 		if err != nil {
 			panic("can not start bufconn")
 		}
