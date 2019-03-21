@@ -192,7 +192,60 @@ func TestPrometheus(t *testing.T) {
 				targets,
 			)
 		}
+	})
 
-		//t.Logf("Logf %v\n", targets)
+	t.Run("ReadWithFilter", func(t *testing.T) {
+		req := prompb.ReadRequest{
+			Queries: []*prompb.Query{
+				{
+					StartTimestampMs: 155307000000,
+					EndTimestampMs:   155308000000,
+					Matchers: []*prompb.LabelMatcher{
+						{
+							Type:  prompb.LabelMatcher_EQ,
+							Name:  "__name__",
+							Value: "cpu_usage",
+						},
+					},
+				},
+			},
+		}
+		res, err := remote.RemoteReader(req)
+		ass.Nil(err)
+		ass.Len(res.Results, 1)
+		ass.Len(res.Results[0].Timeseries, 2)
+		ass.Equal([]*prompb.Label{
+			{
+				Name:  "__name__",
+				Value: "cpu_usage",
+			},
+			{
+				Name:  "instance",
+				Value: "172.24.1.1",
+			},
+			{
+				Name:  "job",
+				Value: "node_exporter",
+			},
+		}, res.Results[0].Timeseries[0].Labels)
+
+		ass.Equal([]prompb.Sample{
+			{
+				Timestamp: 155307000000,
+				Value:     2.5,
+			},
+			{
+				Timestamp: 155307001000,
+				Value:     2.6,
+			},
+			{
+				Timestamp: 155307002000,
+				Value:     2.7,
+			},
+			{
+				Timestamp: 155307003000,
+				Value:     2.8,
+			},
+		}, res.Results[0].Timeseries[0].Samples)
 	})
 }

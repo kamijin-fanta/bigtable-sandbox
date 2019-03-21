@@ -106,14 +106,14 @@ func (p *PrometheusRemote) RemoteWriter(request prompb.WriteRequest) error {
 			valueArr := []byte(strconv.FormatFloat(sample.Value, 'E', -1, 64))
 
 			mut := bigtableCli.NewMutation()
-			mut.Set("met", "ts", bigtableCli.Now(), valueArr)
-			mut.Set("met", "val", bigtableCli.Now(), timeBuffer)
+			mut.Set("met", "ts", bigtableCli.Now(), timeBuffer)
+			mut.Set("met", "val", bigtableCli.Now(), valueArr)
 			writeMutations = append(writeMutations, mut)
 
-			key := "metric:" + id + string(timeBuffer)
+			key := "metric:" + id + ":" + string(timeBuffer)
 			writeKeys = append(writeKeys, key)
 
-			fmt.Printf("Write Metrics %v %v\n", key, mut)
+			//fmt.Printf("Write Metrics %s key:%q\n", id, key)
 
 			// build index
 			indexKey := "index:" + id
@@ -122,7 +122,7 @@ func (p *PrometheusRemote) RemoteWriter(request prompb.WriteRequest) error {
 				return err
 			}
 			if len(currentIndex) == 0 {
-				fmt.Printf("Index not found\n")
+				//fmt.Printf("Index not found\n")
 				indexMut := bigtableCli.NewMutation()
 				for _, label := range timeseries.Labels {
 					// todo more intelligence
@@ -134,7 +134,6 @@ func (p *PrometheusRemote) RemoteWriter(request prompb.WriteRequest) error {
 				}
 			}
 		}
-		fmt.Println(timeseries)
 	}
 
 	errs, err := p.table.ApplyBulk(p.ctx, writeKeys, writeMutations)
@@ -168,8 +167,12 @@ func (p *PrometheusRemote) RemoteRead(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
-	naiveData := p.RemoteReader(rreq)
-	data, _ := proto.Marshal(naiveData)
+	naiveData, _ := p.RemoteReader(rreq)
+	data, err := proto.Marshal(naiveData)
+	if err != nil {
+		fmt.Printf("Request is Failed %v\n", err)
+		http.Error(w, err.Error(), http.StatusBadRequest)
+	}
 	// sender
 	w.Header().Set("Content-Type", "application/x-protobuf")
 	w.Header().Set("Content-Encoding", "snappy")
@@ -179,12 +182,68 @@ func (p *PrometheusRemote) RemoteRead(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (p *PrometheusRemote) RemoteReader(request prompb.ReadRequest) *prompb.ReadResponse {
-	for _, query := range request.Queries {
-		//targets, _ := CollectTargets(p.ctx, p.grpcClient, query.Matchers)
-		fmt.Println(query)
+func ExtractLabel(key string) []*prompb.Label {
+	segments := strings.Split(key, "&")
+	res := make([]*prompb.Label, len(segments))
+	for i, segment := range segments {
+		terms := strings.Split(segment, "=")
+		res[i] = &prompb.Label{
+			Name:  terms[0],
+			Value: terms[len(terms)-1],
+		}
 	}
-	return nil
+	return res
+}
+
+func (p *PrometheusRemote) RemoteReader(request prompb.ReadRequest) (*prompb.ReadResponse, error) {
+	var res prompb.ReadResponse
+	for _, query := range request.Queries {
+		fmt.Println(query)
+		var queryResult prompb.QueryResult
+
+		targets, _ := CollectTargets(p.ctx, p.grpcClient, query.Matchers)
+		for _, target := range targets {
+			var timeSeries prompb.TimeSeries
+			timeSeries.Labels = ExtractLabel(target)
+
+			startTimeBuff := make([]byte, 8)
+			binary.BigEndian.PutUint64(startTimeBuff, uint64(query.StartTimestampMs))
+			startKey := "metric:" + target + ":" + string(startTimeBuff)
+
+			endTimeBuff := make([]byte, 8)
+			binary.BigEndian.PutUint64(endTimeBuff, uint64(query.EndTimestampMs))
+			endKey := "metric:" + target + ":" + string(endTimeBuff)
+
+			r := bigtableCli.NewRange(startKey, endKey)
+			err := p.table.ReadRows(p.ctx, r, func(rows bigtableCli.Row) bool {
+				for _, row := range rows {
+					sample := prompb.Sample{}
+					for _, cell := range row {
+						switch cell.Column {
+						case "met:ts":
+							sample.Timestamp = int64(binary.BigEndian.Uint64(cell.Value))
+						case "met:val":
+							val, _ := strconv.ParseFloat(string(cell.Value), 64)
+							sample.Value = val
+						default:
+							fmt.Printf("Unkown column type %v\n", cell)
+						}
+					}
+					timeSeries.Samples = append(timeSeries.Samples, sample)
+				}
+
+				return true
+			})
+			if err != nil {
+				return nil, err
+			}
+
+			queryResult.Timeseries = append(queryResult.Timeseries, &timeSeries)
+		}
+
+		res.Results = append(res.Results, &queryResult)
+	}
+	return &res, nil
 }
 func CollectTargets(ctx context.Context, client bigtable.BigtableClient, matchers []*prompb.LabelMatcher) ([]string, error) {
 	var subFilters []*bigtable.RowFilter

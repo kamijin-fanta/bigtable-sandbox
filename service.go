@@ -2,7 +2,6 @@ package main
 
 import (
 	"bytes"
-	"fmt"
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/golang/protobuf/ptypes/wrappers"
@@ -164,8 +163,7 @@ func (service *MockBigtableService) ReadRows(req *bigtable.ReadRowsRequest, serv
 			copy(key, iter.Key())
 			value := make([]byte, len(iter.Value()))
 			copy(value, iter.Value())
-			table, rowKey, family, column := KeyDecoder(key)
-			fmt.Printf("Range KeyDecoder: input:%q table: %s key:%q family:%s col: %s\n", key, table, rowKey, family, column)
+			_, rowKey, family, column := KeyDecoder(key)
 
 			if lastKey != nil && !bytes.Equal(lastKey, rowKey) {
 				filtered, err := makeChunk(req.Filter, rowStat)
@@ -193,7 +191,6 @@ func (service *MockBigtableService) ReadRows(req *bigtable.ReadRowsRequest, serv
 		chunks = append(chunks, filtered...)
 	}
 
-	fmt.Printf("Chunk %+v\n", chunks)
 	res := bigtable.ReadRowsResponse{
 		LastScannedRowKey: []byte{},
 		Chunks:            chunks,
