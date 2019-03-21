@@ -129,6 +129,9 @@ func (iter *TikvIter) Next() bool {
 			iter.err = err
 			return false
 		}
+		if len(keys) == 0 {
+			return false
+		}
 		iter.pos = -1
 		iter.keyBuff = keys
 		iter.valueBuff = values

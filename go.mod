@@ -2,6 +2,7 @@ module bigtable-sandbox
 
 require (
 	cloud.google.com/go v0.37.0
+	github.com/bmizerany/perks v0.0.0-20141205001514-d9a9656a3a4b
 	github.com/codahale/hdrhistogram v0.0.0-20161010025455-3a0bb77429bd // indirect
 	github.com/coreos/bbolt v1.3.2 // indirect
 	github.com/coreos/etcd v3.3.12+incompatible // indirect

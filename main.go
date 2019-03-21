@@ -4,13 +4,17 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"github.com/pingcap/tidb/config"
+	"github.com/pingcap/tidb/store/tikv"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	bigtableAdmin "google.golang.org/genproto/googleapis/bigtable/admin/v2"
 	"google.golang.org/genproto/googleapis/bigtable/v2"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 	"net"
 	"net/http"
+	"strings"
 )
 
 func main() {
@@ -20,12 +24,34 @@ func main() {
 	}
 
 	dbPath := flag.String("db", "./data.db", "db path")
-	db, err := leveldb.OpenFile(*dbPath, nil)
-	if err != nil {
-		panic(db)
-	}
+	flag.Parse()
 
-	var store Store = &LeveldbStore{db: db}
+	fmt.Printf("use db: %s\n", *dbPath)
+	var store Store
+	if strings.Index(*dbPath, "pd://") == -1 {
+		opts := &opt.Options{
+			CompactionL0Trigger:           8,
+			CompactionTableSize:           50 * 1024 * 1024,
+			CompactionTotalSizeMultiplier: 10,
+		}
+		db, err := leveldb.OpenFile(*dbPath, opts)
+		if err != nil {
+			panic(db)
+		}
+		store = &LeveldbStore{db: db}
+	} else {
+		path := *dbPath
+		addressList := strings.Split(path[5:], ",")
+		rawClient, err := tikv.NewRawKVClient(addressList, config.Security{})
+		if err != nil {
+			panic(err)
+		}
+		fmt.Printf("tikv cluster: %v\n", rawClient.ClusterID())
+
+		store = &TikvStore{
+			db: rawClient,
+		}
+	}
 	service := MockBigtableService{db: store}
 
 	grpcServer := grpc.NewServer()
