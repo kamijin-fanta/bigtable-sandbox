@@ -5,8 +5,6 @@ import (
 	"github.com/gogo/protobuf/proto"
 	"github.com/golang/protobuf/ptypes/empty"
 	"github.com/golang/protobuf/ptypes/wrappers"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/util"
 	"golang.org/x/net/context"
 	bigtableAdmin "google.golang.org/genproto/googleapis/bigtable/admin/v2"
 	"google.golang.org/genproto/googleapis/bigtable/v2"
@@ -49,22 +47,23 @@ func KeyEncoder(table string, rowKey []byte, family string, column []byte) []byt
 }
 
 func KeyDecoder(encodedKey []byte) (table string, rowKey []byte, family string, column []byte) {
+	key := make([]byte, len(encodedKey))
+	copy(key, encodedKey)
+	encodedKey = key
 	delimiter := byte(':')
-	tablePos := bytes.IndexByte(encodedKey, delimiter)
+	tablePos := bytes.IndexByte(key, delimiter)
 	if tablePos != -1 {
-		rowKeyPos := bytes.IndexByte(encodedKey[tablePos+1:], byte(':'))
+		rowKeyPos := bytes.IndexByte(key[tablePos+1:], byte(':'))
 		if rowKeyPos != -1 {
 			rowKeyPos += tablePos + 1
-			columnPos := bytes.LastIndexByte(encodedKey, delimiter)
+			columnPos := bytes.LastIndexByte(key, delimiter)
 			if columnPos != -1 {
-				familyPos := bytes.LastIndexByte(encodedKey[:columnPos], delimiter)
+				familyPos := bytes.LastIndexByte(key[:columnPos], delimiter)
 				if familyPos != -1 && familyPos != rowKeyPos {
-					table = string(encodedKey[tablePos+1 : rowKeyPos])
-					rowKey = make([]byte, familyPos-rowKeyPos-1)
-					copy(rowKey, encodedKey[rowKeyPos+1:familyPos])
-					family = string(encodedKey[familyPos+1 : columnPos])
-					column = make([]byte, len(encodedKey)-columnPos-1)
-					copy(column, encodedKey[columnPos+1:])
+					table = string(key[tablePos+1 : rowKeyPos])
+					rowKey = key[rowKeyPos+1 : familyPos]
+					family = string(key[familyPos+1 : columnPos])
+					column = key[columnPos+1:]
 				}
 			}
 		}
@@ -205,68 +204,123 @@ func (MockBigtableService) SampleRowKeys(*bigtable.SampleRowKeysRequest, bigtabl
 
 func (service *MockBigtableService) MutateRow(ctx context.Context, req *bigtable.MutateRowRequest) (*bigtable.MutateRowResponse, error) {
 	tableName := TableIdNormalize(req.TableName)
-	for _, mutation := range req.Mutations {
-		err := Mutation(service.db, tableName, req.RowKey, mutation)
-		if err != nil {
-			return nil, err
-		}
+
+	mu := NewMutator(500, service.db)
+	err := mu.Mutation(tableName, req.RowKey, req.Mutations)
+	if err != nil {
+		return nil, err
+	}
+	err = mu.Commit()
+	if err != nil {
+		return nil, err
 	}
 	return &bigtable.MutateRowResponse{}, nil
 }
-func Mutation(db Store, tableName string, rowKey []byte, mutation *bigtable.Mutation) error {
-	switch m := mutation.Mutation.(type) {
-	case *bigtable.Mutation_SetCell_:
-		encoded := KeyEncoder(tableName, rowKey, m.SetCell.FamilyName, m.SetCell.ColumnQualifier)
-		err := db.Put(encoded, m.SetCell.Value)
-		if err != nil {
-			return err
-		}
-	case *bigtable.Mutation_DeleteFromRow_:
-		start := KeyEncoder(tableName, rowKey, "", []byte{})
-		end := append(start, 255)
-		err := db.RangeDelete(start, end)
-		if err != nil {
-			return err
-		}
-	case *bigtable.Mutation_DeleteFromFamily_:
-		start := KeyEncoder(tableName, rowKey, m.DeleteFromFamily.FamilyName, []byte{})
-		end := append(start, 255)
-		err := db.RangeDelete(start, end)
-		if err != nil {
-			return err
-		}
-	case *bigtable.Mutation_DeleteFromColumn_:
-		start := KeyEncoder(tableName, rowKey, m.DeleteFromColumn.FamilyName, m.DeleteFromColumn.ColumnQualifier)
-		end := append(start, 255)
-		err := db.RangeDelete(start, end)
-		if err != nil {
-			return err
-		}
-	default:
-		panic("implement me")
+
+type mutationSet struct {
+	tableName string
+	rowKey    []byte
+	mutation  *bigtable.Mutation
+}
+type mutator struct {
+	batchLength int
+	queue       []mutationSet
+	store       Store
+
+	batchPutKeys   [][]byte
+	batchPutValues [][]byte
+}
+
+func NewMutator(batchLength int, store Store) *mutator {
+	return &mutator{
+		batchLength: batchLength,
+		store:       store,
+	}
+}
+func (m *mutator) Mutation(tableName string, rowKey []byte, mutations []*bigtable.Mutation) error {
+	if m.queue == nil {
+		m.queue = make([]mutationSet, 0, m.batchLength+100)
+	}
+	for _, mutation := range mutations {
+		m.queue = append(m.queue, mutationSet{
+			tableName: tableName,
+			rowKey:    rowKey,
+			mutation:  mutation,
+		})
+	}
+
+	if len(m.queue) > m.batchLength {
+		return m.Commit()
 	}
 	return nil
 }
-func RangeDelete(db *leveldb.DB, start, end []byte) error {
-	iter := db.NewIterator(&util.Range{Start: start, Limit: end}, nil)
-	for iter.Next() {
-		err := db.Delete(iter.Key(), nil)
+
+func (m *mutator) Commit() error {
+	if m.batchPutKeys == nil {
+		m.batchPutKeys = make([][]byte, 0, m.batchLength+100)
+	}
+	if m.batchPutValues == nil {
+		m.batchPutValues = make([][]byte, 0, m.batchLength+100)
+	}
+	for _, item := range m.queue {
+		switch mu := item.mutation.Mutation.(type) {
+		case *bigtable.Mutation_SetCell_:
+			encoded := KeyEncoder(item.tableName, item.rowKey, mu.SetCell.FamilyName, mu.SetCell.ColumnQualifier)
+			m.batchPutKeys = append(m.batchPutKeys, encoded)
+			m.batchPutValues = append(m.batchPutValues, mu.SetCell.Value)
+		case *bigtable.Mutation_DeleteFromRow_:
+			start := KeyEncoder(item.tableName, item.rowKey, "", []byte{})
+			end := append(start, 255)
+			err := m.store.RangeDelete(start, end)
+			if err != nil {
+				return err
+			}
+		case *bigtable.Mutation_DeleteFromFamily_:
+			start := KeyEncoder(item.tableName, item.rowKey, mu.DeleteFromFamily.FamilyName, []byte{})
+			end := append(start, 255)
+			err := m.store.RangeDelete(start, end)
+			if err != nil {
+				return err
+			}
+		case *bigtable.Mutation_DeleteFromColumn_:
+			start := KeyEncoder(item.tableName, item.rowKey, mu.DeleteFromColumn.FamilyName, mu.DeleteFromColumn.ColumnQualifier)
+			end := append(start, 255)
+			err := m.store.RangeDelete(start, end)
+			if err != nil {
+				return err
+			}
+		default:
+			panic("implement me")
+		}
+	}
+	if len(m.batchPutKeys) != 0 {
+		err := m.store.BatchPut(m.batchPutKeys, m.batchPutValues)
 		if err != nil {
 			return err
 		}
+		m.batchPutKeys = m.batchPutKeys[:0]
+		m.batchPutValues = m.batchPutValues[:0]
 	}
 	return nil
 }
 
 func (service *MockBigtableService) MutateRows(req *bigtable.MutateRowsRequest, server bigtable.Bigtable_MutateRowsServer) error {
-	code, msg := int32(codes.OK), ""
 	tableName := TableIdNormalize(req.TableName)
 	response := bigtable.MutateRowsResponse{
 		Entries: make([]*bigtable.MutateRowsResponse_Entry, len(req.Entries)),
 	}
+
+	mu := NewMutator(500, service.db)
 	for i, entry := range req.Entries {
-		for _, mutate := range entry.Mutations {
-			if err := Mutation(service.db, tableName, entry.RowKey, mutate); err != nil {
+		code, msg := int32(codes.OK), ""
+		if err := mu.Mutation(tableName, entry.RowKey, entry.Mutations); err != nil {
+			code = int32(codes.Internal)
+			msg = err.Error()
+		}
+		// last
+		if len(req.Entries)-1 == i {
+			err := mu.Commit()
+			if err != nil {
 				code = int32(codes.Internal)
 				msg = err.Error()
 			}

@@ -2,23 +2,18 @@ package main
 
 import (
 	"bytes"
-	"github.com/pingcap/tidb/store/tikv"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/iterator"
 	"github.com/syndtr/goleveldb/leveldb/util"
+	"github.com/tikv/client-go/rawkv"
 )
 
 type Store interface {
 	Get(key []byte) ([]byte, error)
 	RangeGet(start, limit []byte) iterator.Iterator
 	Put(key, value []byte) error
+	BatchPut(key, value [][]byte) error
 	RangeDelete(start, limit []byte) error
-}
-
-func hoge(rawKvClient tikv.RawKVClient) {
-	//var s Store
-	//s = &LeveldbStore{}
-	//s = &TikvStore{}
 }
 
 type LeveldbStore struct {
@@ -40,6 +35,15 @@ func (store *LeveldbStore) RangeGet(start, limit []byte) iterator.Iterator {
 func (store *LeveldbStore) Put(key, value []byte) error {
 	return store.db.Put(key, value, nil)
 }
+func (store *LeveldbStore) BatchPut(keys, values [][]byte) error {
+	for i := range keys {
+		err := store.db.Put(keys[i], values[i], nil)
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 func (store *LeveldbStore) RangeDelete(start, limit []byte) error {
 	iter := store.db.NewIterator(&util.Range{Start: start, Limit: limit}, nil)
@@ -53,7 +57,7 @@ func (store *LeveldbStore) RangeDelete(start, limit []byte) error {
 }
 
 type TikvStore struct {
-	db *tikv.RawKVClient
+	db *rawkv.Client
 }
 
 func (store *TikvStore) Get(key []byte) ([]byte, error) {
@@ -62,12 +66,14 @@ func (store *TikvStore) Get(key []byte) ([]byte, error) {
 
 func (store *TikvStore) RangeGet(start, limit []byte) iterator.Iterator {
 	var iter iterator.Iterator
-	iter = NewTikvIter(*store, start, limit, 1000)
+	iter = NewTikvIter(*store, start, limit, 100)
 	return iter
 }
-
 func (store *TikvStore) Put(key, value []byte) error {
 	return store.db.Put(key, value)
+}
+func (store *TikvStore) BatchPut(keys, values [][]byte) error {
+	return store.db.BatchPut(keys, values)
 }
 
 func (store *TikvStore) RangeDelete(start, limit []byte) error {
@@ -76,18 +82,18 @@ func (store *TikvStore) RangeDelete(start, limit []byte) error {
 
 func NewTikvIter(store TikvStore, start, end []byte, windowLen int) *TikvIter {
 	return &TikvIter{
-		store: store,
-		start: start,
-		end:   end,
-		limit: windowLen,
+		store:  store,
+		start:  start,
+		end:    end,
+		window: windowLen,
 	}
 }
 
 type TikvIter struct {
-	store TikvStore
-	limit int
-	start []byte
-	end   []byte
+	store  TikvStore
+	window int
+	start  []byte
+	end    []byte
 
 	pos            int
 	keyBuff        [][]byte
@@ -115,7 +121,8 @@ func (iter *TikvIter) Next() bool {
 		iter.err = iterator.ErrIterReleased
 		return false
 	}
-	if len(iter.keyBuff) == iter.pos {
+	iter.pos += 1
+	if len(iter.keyBuff) == 0 || len(iter.keyBuff) == iter.pos {
 		var start []byte
 
 		if iter.lastFetchedKey == nil {
@@ -124,7 +131,7 @@ func (iter *TikvIter) Next() bool {
 			start = append(iter.lastFetchedKey, 0) // open bound
 		}
 
-		keys, values, err := iter.store.db.Scan(start, iter.limit)
+		keys, values, err := iter.store.db.Scan(start, iter.end, iter.window)
 		if err != nil {
 			iter.err = err
 			return false
@@ -132,7 +139,7 @@ func (iter *TikvIter) Next() bool {
 		if len(keys) == 0 {
 			return false
 		}
-		iter.pos = -1
+		iter.pos = 0
 		iter.keyBuff = keys
 		iter.valueBuff = values
 		iter.lastFetchedKey = keys[len(keys)-1]
@@ -140,7 +147,6 @@ func (iter *TikvIter) Next() bool {
 	if len(iter.keyBuff) == 0 {
 		return false
 	}
-	iter.pos += 1
 	if bytes.Compare(iter.end, iter.Key()) <= 0 {
 		return false
 	}

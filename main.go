@@ -4,10 +4,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/pingcap/tidb/config"
-	"github.com/pingcap/tidb/store/tikv"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
+	"github.com/tikv/client-go/config"
+	"github.com/tikv/client-go/rawkv"
 	bigtableAdmin "google.golang.org/genproto/googleapis/bigtable/admin/v2"
 	"google.golang.org/genproto/googleapis/bigtable/v2"
 	"google.golang.org/grpc"
@@ -23,10 +23,10 @@ func main() {
 		panic("failed to listen")
 	}
 
-	dbPath := flag.String("db", "./data.db", "db path")
+	dbPath := flag.String("store", "./data.store", "store path")
 	flag.Parse()
 
-	fmt.Printf("use db: %s\n", *dbPath)
+	fmt.Printf("use store: %s\n", *dbPath)
 	var store Store
 	if strings.Index(*dbPath, "pd://") == -1 {
 		opts := &opt.Options{
@@ -42,7 +42,7 @@ func main() {
 	} else {
 		path := *dbPath
 		addressList := strings.Split(path[5:], ",")
-		rawClient, err := tikv.NewRawKVClient(addressList, config.Security{})
+		rawClient, err := rawkv.NewClient(addressList, config.Security{})
 		if err != nil {
 			panic(err)
 		}

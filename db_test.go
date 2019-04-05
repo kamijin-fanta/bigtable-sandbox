@@ -2,10 +2,10 @@ package main
 
 import (
 	"github.com/joho/godotenv"
-	"github.com/pingcap/tidb/config"
-	"github.com/pingcap/tidb/store/tikv"
 	"github.com/stretchr/testify/assert"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/tikv/client-go/config"
+	"github.com/tikv/client-go/rawkv"
 	"os"
 	"strings"
 	"testing"
@@ -18,7 +18,7 @@ func init() {
 func TestLevedbStore(t *testing.T) {
 	ass := assert.New(t)
 
-	dbPath := "./test.db"
+	dbPath := "./test.store"
 	db, err := leveldb.OpenFile(dbPath, nil)
 	ass.Nil(err)
 	if err != nil {
@@ -40,7 +40,7 @@ func TestTikvStore(t *testing.T) {
 
 	pdAddress := os.Getenv("PD_ADDRESS")
 	addressList := strings.Split(pdAddress, ",")
-	rawClient, err := tikv.NewRawKVClient(addressList, config.Security{})
+	rawClient, err := rawkv.NewClient(addressList, config.Security{})
 	ass.Nil(err)
 	if err != nil {
 		os.Exit(1)
@@ -66,13 +66,20 @@ func StoreSpecs(t *testing.T, store Store) {
 		ass.Equal([]byte("content"), res)
 	})
 	t.Run("range read", func(t *testing.T) {
-		err := store.Put([]byte("z:example2:1"), []byte("1st"))
-		ass.Nil(err)
-		err = store.Put([]byte("z:example2:2"), []byte("2nd"))
-		ass.Nil(err)
-		err = store.Put([]byte("z:example2:3"), []byte("3rd"))
-		ass.Nil(err)
-		err = store.Put([]byte("z:example2:4"), []byte("4th"))
+		err := store.BatchPut(
+			[][]byte{
+				[]byte("z:example2:1"),
+				[]byte("z:example2:2"),
+				[]byte("z:example2:3"),
+				[]byte("z:example2:4"),
+			},
+			[][]byte{
+				[]byte("1st"),
+				[]byte("2nd"),
+				[]byte("3rd"),
+				[]byte("4th"),
+			},
+		)
 		ass.Nil(err)
 
 		iter := store.RangeGet([]byte("z:example2:1"), []byte("z:example2:4"))
