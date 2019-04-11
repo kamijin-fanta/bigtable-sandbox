@@ -1,4 +1,4 @@
-package main
+package services
 
 import (
 	"github.com/joho/godotenv"
@@ -26,7 +26,7 @@ func TestLevedbStore(t *testing.T) {
 	}
 
 	var store Store = &LeveldbStore{
-		db: db,
+		Db: db,
 	}
 
 	StoreSpecs(t, store)
@@ -48,7 +48,7 @@ func TestTikvStore(t *testing.T) {
 
 	var store Store
 	store = &TikvStore{
-		db: rawClient,
+		Db: rawClient,
 	}
 
 	StoreSpecs(t, store)

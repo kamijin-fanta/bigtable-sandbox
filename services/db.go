@@ -1,4 +1,4 @@
-package main
+package services
 
 import (
 	"bytes"
@@ -17,11 +17,11 @@ type Store interface {
 }
 
 type LeveldbStore struct {
-	db *leveldb.DB
+	Db *leveldb.DB
 }
 
 func (store *LeveldbStore) Get(key []byte) ([]byte, error) {
-	res, err := store.db.Get(key, nil)
+	res, err := store.Db.Get(key, nil)
 	if err != nil && err.Error() == "leveldb: not found" {
 		return []byte{}, nil
 	}
@@ -29,15 +29,15 @@ func (store *LeveldbStore) Get(key []byte) ([]byte, error) {
 }
 
 func (store *LeveldbStore) RangeGet(start, limit []byte) iterator.Iterator {
-	return store.db.NewIterator(&util.Range{Start: start, Limit: limit}, nil)
+	return store.Db.NewIterator(&util.Range{Start: start, Limit: limit}, nil)
 }
 
 func (store *LeveldbStore) Put(key, value []byte) error {
-	return store.db.Put(key, value, nil)
+	return store.Db.Put(key, value, nil)
 }
 func (store *LeveldbStore) BatchPut(keys, values [][]byte) error {
 	for i := range keys {
-		err := store.db.Put(keys[i], values[i], nil)
+		err := store.Db.Put(keys[i], values[i], nil)
 		if err != nil {
 			return err
 		}
@@ -46,9 +46,9 @@ func (store *LeveldbStore) BatchPut(keys, values [][]byte) error {
 }
 
 func (store *LeveldbStore) RangeDelete(start, limit []byte) error {
-	iter := store.db.NewIterator(&util.Range{Start: start, Limit: limit}, nil)
+	iter := store.Db.NewIterator(&util.Range{Start: start, Limit: limit}, nil)
 	for iter.Next() {
-		err := store.db.Delete(iter.Key(), nil)
+		err := store.Db.Delete(iter.Key(), nil)
 		if err != nil {
 			return err
 		}
@@ -57,11 +57,11 @@ func (store *LeveldbStore) RangeDelete(start, limit []byte) error {
 }
 
 type TikvStore struct {
-	db *rawkv.Client
+	Db *rawkv.Client
 }
 
 func (store *TikvStore) Get(key []byte) ([]byte, error) {
-	return store.db.Get(key)
+	return store.Db.Get(key)
 }
 
 func (store *TikvStore) RangeGet(start, limit []byte) iterator.Iterator {
@@ -70,14 +70,14 @@ func (store *TikvStore) RangeGet(start, limit []byte) iterator.Iterator {
 	return iter
 }
 func (store *TikvStore) Put(key, value []byte) error {
-	return store.db.Put(key, value)
+	return store.Db.Put(key, value)
 }
 func (store *TikvStore) BatchPut(keys, values [][]byte) error {
-	return store.db.BatchPut(keys, values)
+	return store.Db.BatchPut(keys, values)
 }
 
 func (store *TikvStore) RangeDelete(start, limit []byte) error {
-	return store.db.DeleteRange(start, limit)
+	return store.Db.DeleteRange(start, limit)
 }
 
 func NewTikvIter(store TikvStore, start, end []byte, windowLen int) *TikvIter {
@@ -131,7 +131,7 @@ func (iter *TikvIter) Next() bool {
 			start = append(iter.lastFetchedKey, 0) // open bound
 		}
 
-		keys, values, err := iter.store.db.Scan(start, iter.end, iter.window)
+		keys, values, err := iter.store.Db.Scan(start, iter.end, iter.window)
 		if err != nil {
 			iter.err = err
 			return false

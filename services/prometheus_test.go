@@ -1,4 +1,4 @@
-package main
+package services
 
 import (
 	bigtableCli "cloud.google.com/go/bigtable"

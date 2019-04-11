@@ -1,4 +1,4 @@
-package main
+package services
 
 import (
 	"bytes"
@@ -15,7 +15,7 @@ import (
 )
 
 type MockBigtableService struct {
-	db Store
+	Db Store
 }
 
 //////////////////// Keys ////////////////////
@@ -108,7 +108,7 @@ func (service *MockBigtableService) ReadRows(req *bigtable.ReadRowsRequest, serv
 	for _, rowKey := range req.Rows.RowKeys {
 		startKey := KeyEncoder(tableName, rowKey, "", []byte{})
 		endKey := append(startKey, 255)
-		iter := service.db.RangeGet(startKey, endKey)
+		iter := service.Db.RangeGet(startKey, endKey)
 		var rowStat []*CellStatus
 		for iter.Next() {
 			key := make([]byte, len(iter.Key()))
@@ -154,7 +154,7 @@ func (service *MockBigtableService) ReadRows(req *bigtable.ReadRowsRequest, serv
 			endKey = []byte{255, 255, 255}
 		}
 
-		iter := service.db.RangeGet(startKey, endKey)
+		iter := service.Db.RangeGet(startKey, endKey)
 		var rowStat []*CellStatus
 		var lastKey []byte
 		for iter.Next() {
@@ -205,7 +205,7 @@ func (MockBigtableService) SampleRowKeys(*bigtable.SampleRowKeysRequest, bigtabl
 func (service *MockBigtableService) MutateRow(ctx context.Context, req *bigtable.MutateRowRequest) (*bigtable.MutateRowResponse, error) {
 	tableName := TableIdNormalize(req.TableName)
 
-	mu := NewMutator(500, service.db)
+	mu := NewMutator(500, service.Db)
 	err := mu.Mutation(tableName, req.RowKey, req.Mutations)
 	if err != nil {
 		return nil, err
@@ -310,7 +310,7 @@ func (service *MockBigtableService) MutateRows(req *bigtable.MutateRowsRequest, 
 		Entries: make([]*bigtable.MutateRowsResponse_Entry, len(req.Entries)),
 	}
 
-	mu := NewMutator(500, service.db)
+	mu := NewMutator(500, service.Db)
 	for i, entry := range req.Entries {
 		code, msg := int32(codes.OK), ""
 		if err := mu.Mutation(tableName, entry.RowKey, entry.Mutations); err != nil {
@@ -354,7 +354,7 @@ func (service *MockBigtableService) CreateTable(ctx context.Context, req *bigtab
 		return nil, err
 	}
 	key := TableKeyEncoder(req.TableId)
-	err = service.db.Put(key, tableBytes)
+	err = service.Db.Put(key, tableBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -371,7 +371,7 @@ func (service *MockBigtableService) ListTables(context.Context, *bigtableAdmin.L
 
 func (service *MockBigtableService) GetTable(ctx context.Context, req *bigtableAdmin.GetTableRequest) (*bigtableAdmin.Table, error) {
 	key := TableKeyEncoder(TableIdNormalize(req.Name))
-	tableBytes, err := service.db.Get(key)
+	tableBytes, err := service.Db.Get(key)
 	if err != nil {
 		return nil, err
 	}
@@ -389,7 +389,7 @@ func (service *MockBigtableService) DeleteTable(context.Context, *bigtableAdmin.
 
 func (service *MockBigtableService) ModifyColumnFamilies(ctx context.Context, req *bigtableAdmin.ModifyColumnFamiliesRequest) (*bigtableAdmin.Table, error) {
 	key := TableKeyEncoder(TableIdNormalize(req.Name))
-	tableBytes, err := service.db.Get(key)
+	tableBytes, err := service.Db.Get(key)
 	if err != nil {
 		return nil, err
 	}
@@ -418,7 +418,7 @@ func (service *MockBigtableService) ModifyColumnFamilies(ctx context.Context, re
 		return nil, err
 	}
 
-	err = service.db.Put(key, tableBytes)
+	err = service.Db.Put(key, tableBytes)
 	if err != nil {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-package main
+package services
 
 import (
 	bigtableCli "cloud.google.com/go/bigtable"
@@ -19,18 +19,18 @@ import (
 )
 
 func newClient() (conn *grpc.ClientConn, client bigtable.BigtableClient, ctx context.Context, closer func(), err error) {
-	dbPath := "./test.db"
+	dbPath := "./test.Db"
 	listener := bufconn.Listen(1024 * 1024)
 
 	db, err := leveldb.OpenFile(dbPath, nil)
-	var store Store = &LeveldbStore{db: db}
+	var store Store = &LeveldbStore{Db: db}
 	if err != nil {
 		fmt.Printf("faild open %v", err)
 		return nil, nil, nil, nil, err
 	}
 
 	grpcServer := grpc.NewServer()
-	service := MockBigtableService{db: store}
+	service := MockBigtableService{Db: store}
 	bigtable.RegisterBigtableServer(grpcServer, &service)
 	admin.RegisterBigtableTableAdminServer(grpcServer, &service)
 

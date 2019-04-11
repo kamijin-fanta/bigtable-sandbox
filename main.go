@@ -4,17 +4,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/syndtr/goleveldb/leveldb"
-	"github.com/syndtr/goleveldb/leveldb/opt"
-	"github.com/tikv/client-go/config"
-	"github.com/tikv/client-go/rawkv"
-	bigtableAdmin "google.golang.org/genproto/googleapis/bigtable/admin/v2"
-	"google.golang.org/genproto/googleapis/bigtable/v2"
+	"github.com/kamijin-fanta/bigtable-sandbox/services"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/test/bufconn"
 	"net"
 	"net/http"
-	"strings"
 )
 
 func main() {
@@ -26,7 +20,7 @@ func main() {
 	dbPath := flag.String("store", "./data.store", "store path")
 	flag.Parse()
 	fmt.Printf("use store: %s\n", *dbPath)
-	grpcServer := MustNewServer(*dbPath)
+	grpcServer := services.MustNewServer(*dbPath)
 
 	stop := make(chan bool)
 
@@ -57,7 +51,7 @@ func main() {
 			}),
 			grpc.WithInsecure(),
 		)
-		remote, err := NewPrometheusRemote(conn, ctx, "project", "instance")
+		remote, err := services.NewPrometheusRemote(conn, ctx, "project", "instance")
 		if err != nil {
 			panic("can not connect to remote")
 		}
@@ -70,39 +64,4 @@ func main() {
 		stop <- true
 	}()
 	<-stop
-}
-
-func MustNewServer(dbPath string) *grpc.Server {
-	var store Store
-	if strings.Index(dbPath, "pd://") == -1 {
-		opts := &opt.Options{
-			CompactionL0Trigger:           8,
-			CompactionTableSize:           50 * 1024 * 1024,
-			CompactionTotalSizeMultiplier: 10,
-		}
-		db, err := leveldb.OpenFile(dbPath, opts)
-		if err != nil {
-			panic(db)
-		}
-		store = &LeveldbStore{db: db}
-	} else {
-		path := dbPath
-		addressList := strings.Split(path[5:], ",")
-		rawClient, err := rawkv.NewClient(addressList, config.Security{})
-		if err != nil {
-			panic(err)
-		}
-		fmt.Printf("tikv cluster: %v\n", rawClient.ClusterID())
-
-		store = &TikvStore{
-			db: rawClient,
-		}
-	}
-	service := MockBigtableService{db: store}
-
-	grpcServer := grpc.NewServer()
-	bigtable.RegisterBigtableServer(grpcServer, &service)
-	bigtableAdmin.RegisterBigtableTableAdminServer(grpcServer, &service)
-
-	return grpcServer
 }
