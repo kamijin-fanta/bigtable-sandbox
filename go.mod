@@ -1,4 +1,4 @@
-module bigtable-sandbox
+module github.com/kamijin-fanta/bigtable-sandbox
 
 require (
 	cloud.google.com/go v0.37.0
